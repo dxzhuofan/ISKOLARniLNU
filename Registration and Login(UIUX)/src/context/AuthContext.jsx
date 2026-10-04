@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react';
-import { getSession, loginUser, logoutUser } from '../services/authService';
+import { AuthError, getSession, loginUser, logoutUser } from '../services/authService';
 
 const AuthContext = createContext(null);
 export const useAuth = () => useContext(AuthContext);
@@ -17,6 +17,11 @@ export function AuthProvider({ children }) {
 
   const login = async (credentials) => {
     const { user } = await loginUser(credentials);
+    // Defensive check: the backend must enforce this too.
+    if (credentials.role && user.role !== credentials.role) {
+      await logoutUser().catch(() => {});
+      throw new AuthError(`This account is not ${credentials.role === 'administrator' ? 'an administrator' : 'a student'} account. Use the other tab to sign in.`, 403);
+    }
     setUser(user);
     return user;
   };

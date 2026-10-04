@@ -3,7 +3,7 @@
  * UI components never call fetch() directly.
  *
  * Set VITE_API_URL to connect your real API. Expected endpoints (JSON):
- *   POST /auth/login           { email, password, remember }  -> { user: { id, email, first_name, role } }
+ *   POST /auth/login           { email, password, remember, role }   role = "student" | "administrator" (the tab chosen; reject with 403 if the account's real role differs)  -> { user: { id, email, first_name, role } }
  *   POST /auth/register        { first_name, middle_name, last_name, student_id, email, contact_number, password }
  *   POST /auth/forgot-password { email }
  *   POST /auth/reset-password  { token, password }
@@ -43,14 +43,14 @@ async function request(path, { method = 'POST', body } = {}) {
   return data;
 }
 
-export async function loginUser({ email, password, remember }) {
+export async function loginUser({ email, password, remember, role }) {
   if (isDemoMode) {
     await wait(1100);
     if (password === 'wrongpass') throw new AuthError('Invalid email/username or password.', 401);
     const role = /admin/i.test(email) ? 'administrator' : 'student';
     return { user: { id: 'demo', email, first_name: 'Juan', role } };
   }
-  return request('/auth/login', { body: { email, password, remember } });
+  return request('/auth/login', { body: { email, password, remember, role } });
 }
 
 export async function registerStudent(payload) {
