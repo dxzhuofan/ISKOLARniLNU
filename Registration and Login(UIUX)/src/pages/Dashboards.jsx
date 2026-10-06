@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import IdleTimeout from '../components/IdleTimeout';
 
 function Shell({ title, children }) {
   const { user, logout } = useAuth();
@@ -13,9 +14,12 @@ function Shell({ title, children }) {
       </header>
       <main className="mx-auto max-w-4xl p-6">
         <h1 className="font-serif text-3xl font-bold text-navy-950">{title}</h1>
-        <p className="mt-2 text-slate-600">Signed in as {user.email}. This is a placeholder; replace it with the real dashboard module.</p>
+        <p className="mt-2 text-slate-600">
+          Welcome{user.first_name ? `, ${user.first_name}` : ''}. Signed in as {user.email}. This is a placeholder; replace it with the real dashboard module.
+        </p>
         {children}
       </main>
+      <IdleTimeout />
     </div>
   );
 }

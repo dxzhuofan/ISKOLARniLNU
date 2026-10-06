@@ -50,7 +50,7 @@ function RoleTabs({ role, onChange, disabled }) {
 }
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, notice } = useAuth();
   const navigate = useNavigate();
   const [role, setRole] = useState('student');
   const [status, setStatus] = useState('idle'); // idle | loading | success
@@ -100,6 +100,11 @@ export default function Login() {
         <SuccessMark title="Signed in">Taking you to your dashboard…</SuccessMark>
       ) : (
         <form id="login-panel" role="tabpanel" aria-labelledby={`tab-${role}`} onSubmit={onSubmit} noValidate className="space-y-5">
+          {notice && !formError && (
+            <AlertMessage variant="info">
+              {notice === 'idle' ? 'You were signed out because of inactivity. Please sign in again.' : 'Your session has expired. Please sign in again.'}
+            </AlertMessage>
+          )}
           {formError && <AlertMessage variant="error">{formError}</AlertMessage>}
           <InputField label="LNU Email Address" type="email" autoComplete="username" placeholder="yourname@lnu.edu.ph" {...form.field('email')} />
           <PasswordInput

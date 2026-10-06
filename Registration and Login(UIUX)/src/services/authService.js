@@ -2,23 +2,25 @@
  * Authentication service — the ONLY place that talks to the backend.
  * UI components never call fetch() directly.
  *
- * Set VITE_API_URL to connect your real API. Expected endpoints (JSON):
- *   POST /auth/login           { email, password, remember, role }   role = "student" | "administrator" (the tab chosen; reject with 403 if the account's real role differs)  -> { user: { id, email, first_name, role } }
- *   POST /auth/register        { first_name, middle_name, last_name, student_id, email, contact_number, password }
+ * Set VITE_API_URL (e.g. http://localhost:4000) to connect the real API (see /backend).
+ * Endpoints (JSON, cookie session):
+ *   POST /auth/login           { email, password, remember, role }  -> { user, idleTimeoutSeconds }
+ *                              role = "student" | "administrator" (the tab chosen; server answers 403 if the real role differs)
+ *   POST /auth/register        { first_name, middle_name, last_name, student_id, email, contact_number, password, accept_privacy }
  *   POST /auth/forgot-password { email }
  *   POST /auth/reset-password  { token, password }
  *   POST /auth/logout
- *   GET  /auth/session         -> { user } or 401
+ *   GET  /auth/session         -> { user, idleTimeoutSeconds }  or 401
  * Errors: non-2xx with { message, fields?: { email: "..." } }
  *
- * The backend must hash passwords, validate all input again, and keep the
- * session in an httpOnly, Secure cookie. Never store tokens or passwords in
- * localStorage.
+ * Sessions live in an httpOnly cookie set by the server. The frontend never sees or stores
+ * tokens or passwords.
  */
 const API = import.meta.env.VITE_API_URL;
 
 /** Demo mode exists only in `npm run dev` when no API is configured. Never in production builds. */
 export const isDemoMode = import.meta.env.DEV && !API;
+export const DEFAULT_IDLE_SECONDS = Number(import.meta.env.VITE_IDLE_SECONDS) || 1800;
 
 export class AuthError extends Error {
   constructor(message, status, fields) {
@@ -32,12 +34,17 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function request(path, { method = 'POST', body } = {}) {
   if (!API) throw new AuthError('The sign-in service is not connected yet. Please contact the administrator.');
-  const res = await fetch(`${API}${path}`, {
-    method,
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(`${API}${path}`, {
+      method,
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new AuthError('Unable to reach the server. Check your connection and try again.');
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new AuthError(data.message || 'Something went wrong. Please try again.', res.status, data.fields);
   return data;
@@ -46,9 +53,11 @@ async function request(path, { method = 'POST', body } = {}) {
 export async function loginUser({ email, password, remember, role }) {
   if (isDemoMode) {
     await wait(1100);
-    if (password === 'wrongpass') throw new AuthError('Invalid email/username or password.', 401);
-    const role = /admin/i.test(email) ? 'administrator' : 'student';
-    return { user: { id: 'demo', email, first_name: 'Juan', role } };
+    if (password === 'wrongpass') throw new AuthError('Invalid email or password.', 401);
+    const actual = /admin/i.test(email) ? 'administrator' : 'student';
+    if (role && role !== actual)
+      throw new AuthError(`This account is not ${role === 'administrator' ? 'an administrator' : 'a student'} account. Use the other tab to sign in.`, 403);
+    return { user: { id: 'demo', email, first_name: 'Juan', last_name: 'Dela Cruz', role: actual }, idleTimeoutSeconds: DEFAULT_IDLE_SECONDS };
   }
   return request('/auth/login', { body: { email, password, remember, role } });
 }
@@ -78,11 +87,13 @@ export async function logoutUser() {
   return request('/auth/logout');
 }
 
+/** Returns { user, idleTimeoutSeconds }, or null when signed out (401). Other failures throw. */
 export async function getSession() {
   if (!API) return null;
   try {
-    return (await request('/auth/session', { method: 'GET' })).user ?? null;
-  } catch {
-    return null;
+    return await request('/auth/session', { method: 'GET' });
+  } catch (e) {
+    if (e.status === 401) return null;
+    throw e;
   }
 }

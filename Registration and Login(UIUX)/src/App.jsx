@@ -6,6 +6,7 @@ import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import { AdminDashboard, StudentDashboard } from './pages/Dashboards';
+import { PrivacyNotice, TermsOfUse } from './pages/Legal';
 
 export default function App() {
   return (
@@ -15,6 +16,8 @@ export default function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/privacy" element={<PrivacyNotice />} />
+        <Route path="/terms" element={<TermsOfUse />} />
       </Route>
       <Route path="/student" element={<ProtectedRoute role="student"><StudentDashboard /></ProtectedRoute>} />
       <Route path="/admin" element={<ProtectedRoute role="administrator"><AdminDashboard /></ProtectedRoute>} />

@@ -18,7 +18,7 @@ export default function Register() {
   const [shake, setShake] = useState(false);
 
   const form = useForm(
-    { first_name: '', middle_name: '', last_name: '', student_id: '', email: '', contact_number: '', password: '', confirm: '' },
+    { first_name: '', middle_name: '', last_name: '', student_id: '', email: '', contact_number: '', password: '', confirm: '', accept_privacy: false },
     (v) => clean({
       first_name: required(v.first_name),
       last_name: required(v.last_name),
@@ -27,6 +27,7 @@ export default function Register() {
       contact_number: validateContact(v.contact_number),
       password: validateNewPassword(v.password),
       confirm: validateConfirm(v.password, v.confirm),
+      accept_privacy: v.accept_privacy ? '' : 'You must accept the Data Privacy Notice and Terms of Use.',
     }),
   );
 
@@ -85,6 +86,14 @@ export default function Register() {
             <PasswordStrengthIndicator password={form.values.password} />
           </div>
           <PasswordInput label="Confirm Password" autoComplete="new-password" {...form.field('confirm')} />
+          <div>
+            <label className="flex cursor-pointer items-start gap-3 text-slate-700">
+              <input type="checkbox" name="accept_privacy" checked={form.values.accept_privacy} onChange={form.field('accept_privacy').onChange} onBlur={form.field('accept_privacy').onBlur}
+                aria-invalid={form.field('accept_privacy').error ? 'true' : 'false'} aria-describedby="privacy-error" className="mt-1 size-5 shrink-0 cursor-pointer rounded border-slate-300 accent-navy-800" />
+              <span>I have read and agree to the <a href="/privacy" target="_blank" rel="noreferrer" className="link">Data Privacy Notice</a> and the <a href="/terms" target="_blank" rel="noreferrer" className="link">Terms of Use</a>.</span>
+            </label>
+            {form.field('accept_privacy').error && <p id="privacy-error" role="alert" className="field-error mt-1.5 text-sm font-medium text-danger">{form.field('accept_privacy').error}</p>}
+          </div>
           <LoadingButton loading={status === 'loading'} loadingText="Creating Account...">Create Account</LoadingButton>
         </form>
       )}
