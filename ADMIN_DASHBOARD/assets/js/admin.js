@@ -1,2 +1,0 @@
-document.querySelectorAll('form[data-confirm]').forEach(f=>f.addEventListener('submit',e=>{if(!confirm(f.dataset.confirm))e.preventDefault();}));
-document.querySelectorAll('form').forEach(f=>f.addEventListener('submit',e=>{if(e.defaultPrevented)return;const b=f.querySelector('button[type=submit],button:not([type])');if(b&&!f.matches('.bar')){setTimeout(()=>{b.disabled=true;b.textContent='Please wait…';},0);}}));
