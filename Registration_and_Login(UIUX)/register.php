@@ -13,7 +13,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Create Student Account | LNU Scholarship Portal</title>
-<link rel="stylesheet" href="assets/css/style.css">
+<link rel="stylesheet" href="css/style.css">
 </head>
 <body class="auth-page register-page">
 <header class="topbar">
@@ -57,7 +57,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
 </div></section>
 </main>
 <footer class="site-footer"><span>© <?= date('Y') ?> Leyte Normal University</span><span>Scholarship Management Portal</span><a href="mailto:scholarships@lnu.edu.ph">Need help?</a></footer>
-<script src="assets/js/auth.js"></script>
+<script src="js/auth.js"></script>
 <script>
 (() => {
  const form=document.getElementById('registerForm'); if(!form)return;
