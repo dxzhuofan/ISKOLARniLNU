@@ -21,7 +21,7 @@ $columns = [
     'status'         => ['Status',                 $statusCase],
     'submitted'      => ['Submitted date',         'DATE(a.submitted_at)'],
     'gwa'            => ['GWA at application',     'a.gwa_at_application'],
-    'bank'           => ['Landbank account status', 'COALESCE(m.landbank_status, "")'],
+    'grantee_status' => ['Grantee status', 'COALESCE(g.status, "")'],
 ];
 $sorts = [
     'Last name (A–Z)' => 'ap.last_name, ap.first_name',
@@ -41,8 +41,8 @@ $from = "applications a
     JOIN users u ON u.user_id = ap.user_id
     LEFT JOIN colleges c ON c.college_id = ap.college_id
     JOIN scholarship_programs sp ON sp.scholarship_program_id = a.scholarship_program_id
-    LEFT JOIN grantee_masterlist m ON m.student_number = ap.student_number
-                                  AND m.scholarship_program_id = a.scholarship_program_id";
+    LEFT JOIN grantees g ON g.applicant_id = ap.applicant_id
+                        AND g.scholarship_program_id = a.scholarship_program_id";
 
 $where  = ['a.scholarship_program_id = ?', "a.status <> 'draft'"];
 $params = [$programId];
