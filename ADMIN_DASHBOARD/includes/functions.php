@@ -9,7 +9,7 @@ require_once __DIR__ . '/../../STUDENT_DASHBOARD/includes/db_connect.php';
 $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 
 const STAFF_ROLE = 2;                                 // roles.role_id 2 = administrator
-const LOGIN_URL  = '../STUDENT_DASHBOARD/index.php';  // change to your real login page
+const LOGIN_URL  = '../Registration_and_Login(UIUX)/login.php';
 
 // Names shown to staff for each applications.status value.
 const STATUS = [
@@ -47,16 +47,12 @@ SQL;
 // Like require_student(): returns the signed-in staff member.
 function require_admin(): array
 {
-    // TEMPORARY: login check off for testing on localhost only.
-    // Remove these two comment lines and uncomment the block to turn it back on.
-    /*
-    $role = $_SESSION['role_id'] ?? $_SESSION['user']['role_id'] ?? 0;
-    if (!in_array($role, [STAFF_ROLE, (string)STAFF_ROLE, 'administrator'], true)) {
+    $role = $_SESSION['user']['role'] ?? $_SESSION['role_id'] ?? $_SESSION['user']['role_id'] ?? 0;
+    if (!in_array($role, ['administrator', STAFF_ROLE, (string)STAFF_ROLE], true)) {
         header('Location: ' . LOGIN_URL);
         exit;
     }
-    */
-    return ['user_id' => $_SESSION['user_id'] ?? $_SESSION['user']['user_id'] ?? null];
+    return ['user_id' => $_SESSION['user_id'] ?? $_SESSION['user']['id'] ?? $_SESSION['user']['user_id'] ?? null];
 }
 
 function e($value): string

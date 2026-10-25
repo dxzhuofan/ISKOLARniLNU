@@ -32,7 +32,7 @@ $nav = [
             <span aria-hidden="true"><?= $icon ?></span><?= e($label) ?>
         </a>
     <?php endforeach; ?>
-    <a href="../STUDENT_DASHBOARD/logout.php"><span aria-hidden="true">↩</span>Sign Out</a>
+    <a href="../Registration_and_Login(UIUX)/logout.php"><span aria-hidden="true">↩</span>Sign Out</a>
 </nav>
 <div class="main">
     <header class="top">

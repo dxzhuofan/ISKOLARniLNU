@@ -5,7 +5,7 @@ $me = require_admin();
 // Summary cards
 $totalStudents  = scalar($pdo, 'SELECT COUNT(*) FROM applicants');
 $pendingApps    = scalar($pdo, "SELECT COUNT(*) FROM applications WHERE status = 'submitted'");
-$listedGrantees = scalar($pdo, 'SELECT COUNT(*) FROM grantee_masterlist');
+$listedGrantees = scalar($pdo, "SELECT COUNT(*) FROM grantees WHERE status = 'active'");
 
 // Needs Attention (each count opens the matching list with its filter applied)
 $waiting = scalar($pdo, "SELECT COUNT(*) FROM applications WHERE status IN ('submitted', 'under_review')");
@@ -19,10 +19,8 @@ $flagCount = function (string $flag) use ($pdo): int {
 $attention = [
     ['Applications waiting for review',           $waiting,                                   'applications.php?status=waiting'],
     ['Missing or unreadable documents',           $flagCount('Missing document'),             'applications.php?flag=Missing+document'],
-    ['OCR results needing manual verification',   $flagCount('OCR mismatch'),                 'applications.php?flag=OCR+mismatch'],
+    ['OCR results needing manual verification',   $flagCount('OCR mismatch'),                'applications.php?flag=OCR+mismatch'],
     ['Possible duplicate records',                $flagCount('Possible duplicate'),           'applications.php?flag=Possible+duplicate'],
-    ['Grantee imports containing errors',         scalar($pdo, 'SELECT COUNT(*) FROM grantee_imports WHERE error_rows > 0'), 'grantee_import.php#history'],
-    ['Landbank accounts waiting for verification', scalar($pdo, "SELECT COUNT(*) FROM grantee_masterlist WHERE landbank_status = 'Submitted'"), 'grantees.php?bank=Submitted'],
 ];
 $needsAttention = array_sum(array_column($attention, 1)) - $waiting;
 

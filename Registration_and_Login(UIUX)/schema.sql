@@ -1,0 +1,5 @@
+-- Your existing database is lnu_scholarship_db.
+-- Do NOT import the earlier demo schema: it creates a different users table.
+-- Import your own lnu_scholarship_db SQL dump into phpMyAdmin first.
+-- This application uses the existing roles, users, applicants, staff_profiles,
+-- login_attempts, and password_resets tables.

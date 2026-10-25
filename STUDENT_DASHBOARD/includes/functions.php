@@ -24,11 +24,6 @@ const DOC_STATUS = [
 ];
 const MAX_UPLOAD = 5 * 1024 * 1024;
 
-// TEMPORARY: there is no login page yet. While this is true, every visitor is signed in automatically
-// as the first active student (role_id 1) in the database. Set to false once the login page exists;
-// the portal will then require $_SESSION['user_id'] to be set by that login.
-const DEV_AUTO_LOGIN = true;
-
 function e($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
 function redirect($url) { header('Location: ' . $url); exit; }
 function money($n) { return ($n === null || $n === '') ? null : '₱' . number_format((float)$n, 2); }
@@ -72,12 +67,8 @@ function flash($type = null, $msg = null) {
 // ---- Auth ----
 function require_student() {
     global $pdo;
-    if (empty($_SESSION['user_id'])) {
-        if (!DEV_AUTO_LOGIN) { http_response_code(401); exit('Please log in first.'); }
-        $uid = $pdo->query("SELECT u.user_id FROM users u JOIN applicants a ON a.user_id = u.user_id
-                            WHERE u.role_id = 1 AND u.account_status = 'active' ORDER BY u.user_id LIMIT 1")->fetchColumn();
-        if (!$uid) { http_response_code(500); exit('No active student account found. Import sample_data.sql or add a student.'); }
-        $_SESSION['user_id'] = (int)$uid;
+    if (!isset($_SESSION['user_id']) || !is_numeric($_SESSION['user_id'])) {
+        redirect('../Registration_and_Login(UIUX)/login.php');
     }
     $st = $pdo->prepare('SELECT u.email, u.role_id, u.account_status, u.last_login_at, a.*
                          FROM users u JOIN applicants a ON a.user_id = u.user_id WHERE u.user_id = ?');
