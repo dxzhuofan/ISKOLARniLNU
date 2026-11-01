@@ -64,7 +64,7 @@
       other.tabIndex = active ? 0 : -1;
     });
     const heading = document.getElementById('form-title');
-    if (heading) heading.textContent = role === 'admin' ? 'Administrator Sign In' : 'Student Sign In';
+    if (heading) heading.textContent = role === 'admin' ? 'Staff Sign In' : 'Student Sign In';
     const email = document.getElementById('email');
     if (email) email.setAttribute('autocomplete', 'username');
   }
@@ -89,16 +89,32 @@
   const updatePasswordFeedback = () => {
     if (password && rules) {
       const value = password.value;
-      const checks = { length: value.length >= 8, letter: /[A-Za-z]/.test(value), number: /[0-9]/.test(value) };
+      const checks = {
+        length: value.length >= 8,
+        uppercase: /[A-Z]/.test(value),
+        number: /[0-9]/.test(value),
+        symbol: /[^A-Za-z0-9]/.test(value)
+      };
+      const labels = {
+        length: 'At least 8 characters',
+        uppercase: 'Uppercase letter',
+        number: 'Number',
+        symbol: 'Symbol'
+      };
       Object.entries(checks).forEach(([name, passed]) => {
         const item = rules.querySelector(`[data-rule="${name}"]`);
         if (item) {
           item.classList.toggle('passed', passed);
-          item.textContent = `${passed ? '✓' : '○'} ${{length:'At least 8 characters',letter:'At least one letter',number:'At least one number'}[name]}`;
+          item.textContent = `${passed ? '✓' : '○'} ${labels[name]}`;
         }
       });
       const strength = Object.values(checks).filter(Boolean).length;
-      rules.dataset.strength = value.length === 0 ? 'empty' : strength === 3 ? 'strong' : strength === 2 ? 'medium' : 'weak';
+      rules.dataset.strength = value.length === 0 ? 'empty' : strength >= 4 ? 'strong' : strength >= 3 ? 'medium' : 'weak';
+      const meter = document.querySelector('.password-strength');
+      if (meter) {
+        meter.dataset.strength = value.length === 0 ? 'empty' : strength >= 4 ? 'strong' : strength >= 3 ? 'medium' : 'weak';
+        [...meter.children].forEach((bar, index) => bar.classList.toggle('filled', index < strength));
+      }
     }
     if (password && confirmPassword && confirmPassword.value) {
       const matches = password.value === confirmPassword.value;
@@ -114,13 +130,29 @@
   const registerForm = document.getElementById('registerForm');
   const resetForm = document.getElementById('resetForm');
   const loginForm = document.getElementById('loginForm');
+  const loginEmail = loginForm && loginForm.querySelector('input[name="email"]');
+  const updateLoginEmailHint = () => {
+    if (!loginEmail) return;
+    const value = loginEmail.value.trim();
+    const validDomain = /@lnu\.edu\.ph$/i.test(value);
+    loginEmail.setCustomValidity(value && !validDomain ? 'Use an email address ending in @lnu.edu.ph.' : '');
+  };
+  if (loginEmail) {
+    loginEmail.addEventListener('input', updateLoginEmailHint);
+    updateLoginEmailHint();
+  }
   document.querySelectorAll('form[novalidate]').forEach((form) => {
     form.addEventListener('submit', (event) => {
+      if (form === registerForm) return;
       let firstInvalid = null;
       form.querySelectorAll('input[required]').forEach((field) => {
         if (field === confirmPassword) field.setCustomValidity(password && field.value !== password.value ? 'Passwords do not match.' : '');
         if (field.type === 'checkbox' && !field.checked) field.setCustomValidity('Please confirm this checkbox.');
-        else if (field.type !== 'checkbox' && !field.checkValidity()) field.setCustomValidity(field.type === 'email' ? 'Enter a valid email address.' : 'Please complete this field.');
+        else if (field.type !== 'checkbox' && !field.checkValidity()) {
+          field.setCustomValidity(field === loginEmail
+            ? 'Enter a valid email address ending in @lnu.edu.ph.'
+            : field.type === 'email' ? 'Enter a valid email address.' : 'Please complete this field.');
+        }
         else if (field.type !== 'checkbox' && field !== confirmPassword) field.setCustomValidity('');
         if (!field.checkValidity() && !firstInvalid) firstInvalid = field;
       });
@@ -131,9 +163,9 @@
         showToast(firstInvalid.validationMessage || 'Please check the highlighted fields.', 'error');
         return;
       }
-      if ((registerForm || resetForm) && password && (password.value.length < 8 || !/[A-Za-z]/.test(password.value) || !/[0-9]/.test(password.value))) {
+      if (resetForm && password && (password.value.length < 8 || !/[A-Z]/.test(password.value) || !/[0-9]/.test(password.value) || !/[^A-Za-z0-9]/.test(password.value))) {
         event.preventDefault();
-        showToast('Use at least 8 characters, including a letter and a number.', 'error');
+        showToast('Use at least 8 characters, an uppercase letter, a number, and a symbol.', 'error');
         password.focus();
         return;
       }

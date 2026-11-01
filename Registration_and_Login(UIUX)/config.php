@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+date_default_timezone_set('Asia/Manila');
 if (session_status() !== PHP_SESSION_ACTIVE) {
     ini_set('session.use_strict_mode', '1');
     session_set_cookie_params([
@@ -25,7 +26,6 @@ const DB_PASS = '';
 // URL of this project directory (without a trailing slash).
 const APP_ENV = 'local';
 const APP_BASE_URL = 'http://localhost/ISKOLARniLNU/Registration_and_Login(UIUX)';
-const MAIL_FROM = 'no-reply@lnu.edu.ph';
 
 function db(): PDO {
     static $pdo = null;
@@ -36,6 +36,7 @@ function db(): PDO {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES => false,
     ]);
+    $pdo->exec("SET time_zone = '+08:00'");
     return $pdo;
 }
 
@@ -73,4 +74,75 @@ function current_user(): ?array {
 function require_login(?string $role = null): void {
     $user = current_user();
     if (!$user || ($role !== null && $user['role'] !== $role)) redirect('login.php');
+}
+
+function dashboard_path_for_role(string $role): string {
+    if ($role === 'reviewer') return '../ADMIN_DASHBOARD/applications.php';
+    if (in_array($role, ['administrator', 'scholarship_officer'], true)) return '../ADMIN_DASHBOARD/dashboard.php';
+    return '../STUDENT_DASHBOARD/dashboard.php';
+}
+
+require_once __DIR__ . '/mail.php';
+
+function issue_auth_otp(PDO $pdo, ?int $userId, string $email, string $purpose): array {
+    $lockName = 'lnu_otp_' . substr(hash('sha256', $email . "\0" . $purpose), 0, 48);
+    $lock = $pdo->prepare('SELECT GET_LOCK(?, 5)');
+    $lock->execute([$lockName]);
+    if ((int)$lock->fetchColumn() !== 1) throw new RuntimeException('Could not safely start verification. Please try again.');
+    try {
+        $latest = $pdo->prepare(
+            'SELECT last_sent_at, locked_until FROM auth_otps
+             WHERE email = ? AND purpose = ? ORDER BY otp_id DESC LIMIT 1'
+        );
+        $latest->execute([$email, $purpose]);
+        $last = $latest->fetch();
+        if ($last) {
+            if (!empty($last['locked_until']) && strtotime($last['locked_until']) > time()) {
+                return ['wait' => strtotime($last['locked_until']) - time(), 'code' => null, 'sent' => false];
+            }
+            $wait = 60 - (time() - strtotime((string)$last['last_sent_at']));
+            if ($wait > 0) return ['wait' => $wait, 'code' => null, 'sent' => false];
+        }
+
+        $code = (string)random_int(100000, 999999);
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare('UPDATE auth_otps SET used_at = NOW() WHERE email = ? AND purpose = ? AND used_at IS NULL')
+                ->execute([$email, $purpose]);
+            $pdo->prepare(
+                'INSERT INTO auth_otps (user_id, email, purpose, otp_hash, expires_at, last_sent_at)
+                 VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE), NOW())'
+            )->execute([$userId, $email, $purpose, password_hash($code, PASSWORD_DEFAULT)]);
+            $pdo->commit();
+        } catch (Throwable $error) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $error;
+        }
+    } finally {
+        $release = $pdo->prepare('SELECT RELEASE_LOCK(?)');
+        $release->execute([$lockName]);
+    }
+
+    $subject = match ($purpose) {
+        'registration' => 'Verify your LNU Scholarship Portal email',
+        'forgot_password' => 'Your LNU password reset code',
+        'password_change' => 'Confirm your LNU password change',
+        default => 'Your LNU Scholarship Portal verification code',
+    };
+    $sent = send_portal_email(
+        $email,
+        $subject,
+        "Your verification code is {$code}. It expires in 10 minutes and can be used once. "
+        . "If you did not request this code, you can ignore this message.\n"
+    );
+    return ['wait' => 60, 'code' => $code, 'sent' => $sent];
+}
+
+function send_password_change_notice(string $email): bool {
+    return send_portal_email(
+        $email,
+        'Your LNU Scholarship Portal password was changed',
+        "The password for your LNU Scholarship Portal account was changed. "
+        . "If you did not make this change, contact the Scholarship Office immediately.\n"
+    );
 }

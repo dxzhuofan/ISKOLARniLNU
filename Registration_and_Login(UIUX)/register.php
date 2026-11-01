@@ -1,11 +1,100 @@
 <?php
+declare(strict_types=1);
 require_once __DIR__ . '/config.php';
-if(current_user()) redirect(current_user()['role']==='administrator'?'../ADMIN_DASHBOARD/dashboard.php':'../STUDENT_DASHBOARD/dashboard.php');
-$errors=[]; $firstName=$middleName=$lastName=$studentNumber=$mobile=$email='';
-if($_SERVER['REQUEST_METHOD']==='POST'){
- verify_csrf(); $firstName=trim((string)($_POST['first_name']??'')); $middleName=trim((string)($_POST['middle_name']??'')); $lastName=trim((string)($_POST['last_name']??'')); $studentNumber=trim((string)($_POST['student_number']??'')); $mobile=trim((string)($_POST['mobile_number']??'')); $email=strtolower(trim((string)($_POST['email']??''))); $password=(string)($_POST['password']??''); $confirm=(string)($_POST['confirm_password']??'');
- if($firstName===''||mb_strlen($firstName)>80)$errors[]='Enter your first name (up to 80 characters).'; if($lastName===''||mb_strlen($lastName)>80)$errors[]='Enter your last name (up to 80 characters).'; if($middleName!==''&&mb_strlen($middleName)>80)$errors[]='Middle name must be 80 characters or fewer.'; if($studentNumber===''||mb_strlen($studentNumber)>30)$errors[]='Enter your student number (up to 30 characters).'; if($mobile===''||mb_strlen($mobile)>20)$errors[]='Enter your mobile number (up to 20 characters).'; if(!filter_var($email,FILTER_VALIDATE_EMAIL)||mb_strlen($email)>150)$errors[]='Enter a valid email address (up to 150 characters).'; if(strlen($password)<8||!preg_match('/[A-Za-z]/',$password)||!preg_match('/[0-9]/',$password))$errors[]='Password must be at least 8 characters and include a letter and a number.'; if($password!==$confirm)$errors[]='The passwords do not match.';
- if(!$errors)try{$pdo=db();$pdo->beginTransaction();$r=$pdo->prepare("SELECT role_id FROM roles WHERE role_name='applicant' LIMIT 1");$r->execute();$roleId=$r->fetchColumn();if(!$roleId)throw new RuntimeException('The applicant role is missing from the roles table.');$q=$pdo->prepare('INSERT INTO users(role_id,email,password_hash,account_status) VALUES(?,?,?,\'active\')');$q->execute([$roleId,$email,password_hash($password,PASSWORD_DEFAULT)]);$uid=(int)$pdo->lastInsertId();$a=$pdo->prepare('INSERT INTO applicants(user_id,student_number,first_name,middle_name,last_name,mobile_number) VALUES(?,?,?,?,?,?)');$a->execute([$uid,$studentNumber,$firstName,$middleName!==''?$middleName:null,$lastName,$mobile]);$pdo->commit();redirect('login.php?registered=1');}catch(PDOException $ex){if(isset($pdo)&&$pdo->inTransaction())$pdo->rollBack();$errors[]=$ex->getCode()==='23000'?'That email or student number is already registered.':'Could not create the account. Confirm the database connection and required tables.';}catch(Throwable $ex){if(isset($pdo)&&$pdo->inTransaction())$pdo->rollBack();$errors[]='Registration setup issue: '.$ex->getMessage();}
+if (current_user()) redirect(dashboard_path_for_role((string)current_user()['role']));
+
+$catalog = require __DIR__ . '/academic_catalog.php';
+$errors = [];
+$values = [
+    'email' => '', 'first_name' => '', 'middle_name' => '', 'last_name' => '',
+    'student_number' => '', 'mobile_number' => '', 'year_level' => '',
+    'college_code' => '', 'program_code' => '', 'specialization' => '',
+];
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    verify_csrf();
+    foreach ($values as $key => $_) {
+        $values[$key] = trim((string)($_POST[$key] ?? ''));
+    }
+    $password = (string)($_POST['password'] ?? '');
+    $confirm = (string)($_POST['confirm_password'] ?? '');
+
+    foreach (['first_name' => 'First name', 'last_name' => 'Last name'] as $key => $label) {
+        if ($values[$key] === '' || mb_strlen($values[$key]) > 80) $errors[] = "{$label} is required and must be at most 80 characters.";
+    }
+    if (mb_strlen($values['middle_name']) > 80) $errors[] = 'Middle name must be at most 80 characters.';
+    if (!preg_match('/^\d{7}$/', $values['student_number'])) $errors[] = 'Student ID must contain exactly 7 digits.';
+    if (!preg_match('/^09\d{9}$/', $values['mobile_number'])) $errors[] = 'Phone number must contain 11 digits and start with 09.';
+    if (!filter_var($values['email'], FILTER_VALIDATE_EMAIL) || mb_strlen($values['email']) > 150
+        || !preg_match('/@lnu\.edu\.ph$/i', $values['email'])) {
+        $errors[] = 'Use a valid LNU email address ending in @lnu.edu.ph.';
+    }
+    if (strlen($password) < 8 || !preg_match('/[A-Z]/', $password) || !preg_match('/\d/', $password)
+        || !preg_match('/[^A-Za-z0-9]/', $password)) {
+        $errors[] = 'Password must be at least 8 characters and include an uppercase letter, a number, and a symbol.';
+    }
+    if ($password !== $confirm) $errors[] = 'The passwords do not match.';
+    if (($_POST['agree'] ?? '') !== '1') $errors[] = 'Confirm the account information before continuing.';
+
+    $college = $catalog[$values['college_code']] ?? null;
+    $program = $college['programs'][$values['program_code']] ?? null;
+    if (!$values['year_level'] || !preg_match('/^[1-5]$/', $values['year_level'])) {
+        $errors[] = 'Choose a year level from 1 to 5.';
+    }
+    if (!$college || !$program) {
+        $errors[] = 'Choose a valid college and program.';
+    } elseif ($program['requires_specialization']) {
+        if (!in_array($values['specialization'], $program['specializations'], true)) {
+            $errors[] = 'Choose a valid specialization for the selected program.';
+        }
+    } elseif ($values['specialization'] !== '') {
+        $errors[] = 'The selected program does not have a specialization.';
+    }
+
+    if (!$errors) {
+        try {
+            $pdo = db();
+            $duplicate = $pdo->prepare(
+                'SELECT a.student_number, u.email FROM applicants a
+                 JOIN users u ON u.user_id = a.user_id
+                 WHERE a.student_number = ? OR u.email = ? LIMIT 1'
+            );
+            $duplicate->execute([$values['student_number'], $values['email']]);
+            if ($duplicate->fetch()) {
+                $errors[] = 'That email or student ID is already registered.';
+            } else {
+                $_SESSION['pending_registration'] = [
+                    'email' => $values['email'],
+                    'first_name' => $values['first_name'],
+                    'middle_name' => $values['middle_name'],
+                    'last_name' => $values['last_name'],
+                    'student_number' => $values['student_number'],
+                    'mobile_number' => $values['mobile_number'],
+                    'year_level' => (int)$values['year_level'],
+                    'college_code' => $values['college_code'],
+                    'program_code' => $values['program_code'],
+                    'program_type' => $program['type'],
+                    'specialization' => $values['specialization'],
+                    'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+                    'expires_at' => time() + 600,
+                ];
+                $otp = issue_auth_otp($pdo, null, $values['email'], 'registration');
+                if ($otp['wait'] > 0 && $otp['code'] === null) {
+                    $errors[] = 'A verification code was recently sent. Please wait before requesting another one.';
+                } else {
+                    $_SESSION['otp_context_email'] = $values['email'];
+                    $_SESSION['otp_context_purpose'] = 'registration';
+                    $_SESSION['otp_resend_after'] = time() + 60;
+                    $_SESSION['dev_otp'] = APP_ENV === 'local' && !$otp['sent'] ? $otp['code'] : null;
+                    $_SESSION['otp_delivery_error'] = !$otp['sent'] && APP_ENV !== 'local';
+                    redirect('verify_otp.php?purpose=registration');
+                }
+            }
+        } catch (Throwable $error) {
+            error_log('LNU registration initiation error: ' . $error->getMessage());
+            $errors[] = 'Registration could not be started. Confirm the database connection and try again.';
+        }
+    }
 }
 ?>
 <!doctype html>
@@ -22,55 +111,54 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
 </header>
 <main class="single-layout register-layout">
 <section class="form-panel register-panel"><div class="form-accent"></div><div class="form-inner">
-  <p class="kicker">GET STARTED</p><h2>Create your student account</h2><p class="muted">Enter the details used for your LNU applicant profile.</p>
-  <?php if($errors): ?><div class="alert error" role="alert"><strong>Please check the following:</strong><ul><?php foreach($errors as $err): ?><li><?= e($err) ?></li><?php endforeach; ?></ul></div><?php endif; ?>
+  <p class="kicker">GET STARTED</p><h2>Create your student account</h2><p class="muted">Complete the three steps, then verify your LNU email address.</p>
+  <?php if ($errors): ?><div class="alert error" role="alert"><strong>Please check the following:</strong><ul><?php foreach ($errors as $error): ?><li><?= e($error) ?></li><?php endforeach; ?></ul></div><?php endif; ?>
+  <div class="register-progress" role="progressbar" aria-valuemin="1" aria-valuemax="3" aria-valuenow="1" aria-label="Registration progress, step 1 of 3"><span id="registerProgressBar"></span></div>
   <div class="register-steps" role="tablist" aria-label="Registration steps">
-    <button class="register-step active" type="button" role="tab" aria-selected="true" aria-controls="register-step-1" data-step="1"><span class="step-number">1</span><span><strong>Personal details</strong><small>Name and student number</small></span></button>
+    <button class="register-step active" type="button" role="tab" aria-selected="true" aria-controls="register-step-1" data-step="1"><span class="step-number">1</span><span><strong>Account</strong><small>Email and password</small></span></button>
     <span class="step-connector" aria-hidden="true"></span>
-    <button class="register-step" type="button" role="tab" aria-selected="false" aria-controls="register-step-2" data-step="2"><span class="step-number">2</span><span><strong>Account security</strong><small>Contact and password</small></span></button>
+    <button class="register-step" type="button" role="tab" aria-selected="false" aria-controls="register-step-2" data-step="2"><span class="step-number">2</span><span><strong>Personal Info</strong><small>Your contact details</small></span></button>
+    <span class="step-connector" aria-hidden="true"></span>
+    <button class="register-step" type="button" role="tab" aria-selected="false" aria-controls="register-step-3" data-step="3"><span class="step-number">3</span><span><strong>Academic Info</strong><small>Program selection</small></span></button>
   </div>
   <form method="post" action="register.php" id="registerForm" novalidate>
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-    <section class="register-step-panel active" id="register-step-1" role="tabpanel" aria-label="Personal details">
-      <div class="register-fields two-col">
-        <div class="register-field"><label for="first_name">First name</label><input id="first_name" name="first_name" autocomplete="given-name" value="<?= e($firstName) ?>" required maxlength="80" placeholder="Enter first name"></div>
-        <div class="register-field"><label for="middle_name">Middle name <span class="optional">(optional)</span></label><input id="middle_name" name="middle_name" autocomplete="additional-name" value="<?= e($middleName) ?>" maxlength="80" placeholder="Enter middle name"></div>
-        <div class="register-field"><label for="last_name">Last name</label><input id="last_name" name="last_name" autocomplete="family-name" value="<?= e($lastName) ?>" required maxlength="80" placeholder="Enter last name"></div>
-        <div class="register-field"><label for="student_number">Student number</label><input id="student_number" name="student_number" placeholder="e.g. 2026-00001" value="<?= e($studentNumber) ?>" required maxlength="30"></div>
-      </div>
-      <div class="register-actions"><span class="step-hint">Step 1 of 2 · Personal information</span><button class="primary-btn" type="button" id="registerNext">Continue <span aria-hidden="true">→</span></button></div>
+    <section class="register-step-panel active" id="register-step-1" role="tabpanel" aria-label="Account">
+      <div class="register-field"><label for="email">LNU email address</label><input id="email" name="email" type="email" autocomplete="email" placeholder="juan@lnu.edu.ph" value="<?= e($values['email']) ?>" required maxlength="150"><small class="field-hint" id="emailHint" aria-live="polite">Use your LNU email: juan@lnu.edu.ph</small></div>
+      <div class="register-field"><label for="password">Create password</label><div class="password-wrap"><input id="password" name="password" type="password" autocomplete="new-password" placeholder="At least 8 characters" required><button type="button" class="toggle-password" data-toggle="password" aria-label="Show password"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
+      <div class="password-strength" aria-label="Password strength"><span></span><span></span><span></span><span></span></div>
+      <div class="password-rules" id="passwordRules"><span data-rule="length">○ At least 8 characters</span><span data-rule="uppercase">○ Uppercase letter</span><span data-rule="number">○ Number</span><span data-rule="symbol">○ Symbol</span></div>
+      <div class="register-field"><label for="confirm_password">Confirm password</label><div class="password-wrap"><input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" placeholder="Re-enter password" required><button type="button" class="toggle-password" data-toggle="confirm_password" aria-label="Show password"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
+      <div class="register-actions"><span class="step-hint">Step 1 of 3</span><button class="primary-btn" type="button" id="registerNext">Continue <span aria-hidden="true">→</span></button></div>
     </section>
-    <section class="register-step-panel" id="register-step-2" role="tabpanel" aria-label="Account security" hidden>
+    <section class="register-step-panel" id="register-step-2" role="tabpanel" aria-label="Personal information" hidden>
       <div class="register-fields two-col">
-        <div class="register-field"><label for="mobile_number">Mobile number</label><input id="mobile_number" name="mobile_number" type="tel" autocomplete="tel" placeholder="09XXXXXXXXX" value="<?= e($mobile) ?>" required maxlength="20"></div>
-        <div class="register-field"><label for="email">LNU email address</label><input id="email" name="email" type="email" autocomplete="email" placeholder="yourname@lnu.edu.ph" value="<?= e($email) ?>" required maxlength="150"></div>
-        <div class="register-field"><label for="password">Create password</label><div class="password-wrap"><input id="password" name="password" type="password" autocomplete="new-password" placeholder="At least 8 characters" required><button type="button" class="toggle-password" data-toggle="password" aria-label="Show password"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
-        <div class="register-field"><label for="confirm_password">Confirm password</label><div class="password-wrap"><input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" placeholder="Re-enter password" required><button type="button" class="toggle-password" data-toggle="confirm_password" aria-label="Show confirm password"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
+        <div class="register-field"><label for="first_name">First name</label><input id="first_name" name="first_name" autocomplete="given-name" value="<?= e($values['first_name']) ?>" required maxlength="80"></div>
+        <div class="register-field"><label for="middle_name">Middle name <span class="optional">(optional)</span></label><input id="middle_name" name="middle_name" autocomplete="additional-name" value="<?= e($values['middle_name']) ?>" maxlength="80"></div>
+        <div class="register-field"><label for="last_name">Last name</label><input id="last_name" name="last_name" autocomplete="family-name" value="<?= e($values['last_name']) ?>" required maxlength="80"></div>
+        <div class="register-field"><label for="student_number">Student ID</label><input id="student_number" name="student_number" inputmode="numeric" autocomplete="off" placeholder="7 digits" value="<?= e($values['student_number']) ?>" required maxlength="7" pattern="\d{7}" title="Enter exactly 7 digits"></div>
+        <div class="register-field"><label for="mobile_number">Phone number</label><input id="mobile_number" name="mobile_number" type="tel" inputmode="numeric" autocomplete="tel" placeholder="09XXXXXXXXX" value="<?= e($values['mobile_number']) ?>" required maxlength="11" pattern="09\d{9}" title="Enter 11 digits starting with 09"></div>
       </div>
-      <div class="password-rules" id="passwordRules"><span data-rule="length">○ At least 8 characters</span><span data-rule="letter">○ At least one letter</span><span data-rule="number">○ At least one number</span></div>
-      <label class="check-row terms-row"><input type="checkbox" id="agree" required><span>I confirm the information is accurate and agree to the portal's account terms.</span></label>
-      <div class="register-actions"><button class="secondary-btn" type="button" id="registerBack">← Back</button><span class="step-hint">Step 2 of 2 · Secure your account</span><button class="primary-btn" type="submit">Create Account <span aria-hidden="true">→</span></button></div>
+      <div class="register-actions"><button class="secondary-btn" type="button" data-previous>← Back</button><span class="step-hint">Step 2 of 3</span><button class="primary-btn" type="button" data-next>Continue <span aria-hidden="true">→</span></button></div>
+    </section>
+    <section class="register-step-panel" id="register-step-3" role="tabpanel" aria-label="Academic information" hidden>
+      <div class="register-fields two-col">
+        <div class="register-field"><label for="year_level">Year level</label><select id="year_level" name="year_level" required><option value="">Choose year</option><?php for ($year = 1; $year <= 5; $year++): ?><option value="<?= $year ?>" <?= $values['year_level'] === (string)$year ? 'selected' : '' ?>>Year <?= $year ?></option><?php endfor; ?></select></div>
+        <div class="register-field"><label for="college_code">College</label><select id="college_code" name="college_code" required><option value="">Choose college</option><?php foreach ($catalog as $code => $college): ?><option value="<?= e($code) ?>" <?= $values['college_code'] === $code ? 'selected' : '' ?>><?= e($college['name']) ?></option><?php endforeach; ?></select></div>
+        <div class="register-field"><label for="program_code">Program</label><select id="program_code" name="program_code" data-selected="<?= e($values['program_code']) ?>" required disabled><option value="">Choose program</option></select></div>
+        <div class="register-field" id="specializationField" hidden><label for="specialization">Specialization / major</label><select id="specialization" name="specialization" data-selected="<?= e($values['specialization']) ?>" disabled><option value="">Choose specialization</option></select></div>
+      </div>
+      <p class="field-hint certificate-note" id="certificateNote" hidden>Teacher Certificate Program year-level and scholarship eligibility rules are pending Scholarship Office confirmation.</p>
+      <label class="check-row terms-row"><input type="checkbox" id="agree" name="agree" value="1" required><span>I confirm the information is accurate and agree to the portal's account terms.</span></label>
+      <div class="register-actions"><button class="secondary-btn" type="button" data-previous>← Back</button><span class="step-hint">Step 3 of 3</span><button class="primary-btn" type="submit">Create Account <span aria-hidden="true">→</span></button></div>
     </section>
   </form>
   <p class="form-foot">Already registered? <a href="login.php">Sign in instead</a></p>
-  <div class="security-note"><span class="lock-icon">✓</span><span><strong>Account details are stored securely</strong><br>Your password is saved as a secure hash.</span></div>
+  <div class="security-note"><span class="lock-icon">✓</span><span><strong>Account details are stored securely</strong><br>Your password is hashed and program choices are validated by the server.</span></div>
 </div></section>
 </main>
 <footer class="site-footer"><span>© <?= date('Y') ?> Leyte Normal University</span><span>Scholarship Management Portal</span><a href="mailto:scholarships@lnu.edu.ph">Need help?</a></footer>
+<script>window.LNU_ACADEMIC_CATALOG = <?= json_encode($catalog, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;</script>
 <script src="js/auth.js"></script>
-<script>
-(() => {
- const form=document.getElementById('registerForm'); if(!form)return;
- const tabs=[...document.querySelectorAll('.register-step')], panels=[...document.querySelectorAll('.register-step-panel')];
- let current=1;
- function showStep(n){current=n;tabs.forEach((tab)=>{const active=Number(tab.dataset.step)===n;tab.classList.toggle('active',active);tab.setAttribute('aria-selected',String(active));});panels.forEach((panel)=>{const active=panel.id===`register-step-${n}`;panel.classList.toggle('active',active);panel.hidden=!active;});}
- function validateStep(n){const panel=document.getElementById(`register-step-${n}`);for(const field of panel.querySelectorAll('input[required]')){if(field.type==='checkbox'&&!field.checked){field.setCustomValidity('Please confirm the account terms.');}else if(field.type==='checkbox'){field.setCustomValidity('');}else if(!field.checkValidity()){field.setCustomValidity(field.type==='email'?'Enter a valid email address.':'Please complete this field.');}else{field.setCustomValidity('');}if(!field.checkValidity()){field.reportValidity();field.focus();return false;}}
-  if(n===2){const pw=document.getElementById('password'),confirm=document.getElementById('confirm_password');if(pw.value.length<8||!/[A-Za-z]/.test(pw.value)||!/[0-9]/.test(pw.value)){pw.setCustomValidity('Use at least 8 characters, including a letter and a number.');pw.reportValidity();pw.focus();return false;}pw.setCustomValidity('');if(confirm.value!==pw.value){confirm.setCustomValidity('Passwords do not match.');confirm.reportValidity();confirm.focus();return false;}confirm.setCustomValidity('');}
-  return true;}
- document.getElementById('registerNext').addEventListener('click',()=>{if(validateStep(1)){showStep(2);document.getElementById('mobile_number').focus({preventScroll:true});}});
- document.getElementById('registerBack').addEventListener('click',()=>showStep(1));
- tabs.forEach(tab=>tab.addEventListener('click',()=>{const target=Number(tab.dataset.step);if(target===1||target===current+1&&validateStep(current))showStep(target);}));
- const hasErrors=!!document.querySelector('.alert.error');showStep(hasErrors?2:1);
-})();
-</script>
+<script src="js/register.js"></script>
 </body></html>

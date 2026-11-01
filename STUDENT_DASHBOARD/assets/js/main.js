@@ -5,6 +5,15 @@
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
   const csrf = ($('meta[name="csrf"]') || {}).content || '';
 
+  $$('[data-digits-only]').forEach(field => {
+    const clean = () => { field.value = field.value.replace(/\D/g, '').slice(0, field.maxLength); };
+    field.addEventListener('input', clean);
+    field.addEventListener('paste', event => {
+      event.preventDefault();
+      field.value = (event.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '').slice(0, field.maxLength);
+    });
+  });
+
   // ---- Menus: hamburger, notifications, profile ----
   const burger = $('#burger'), links = $('#navLinks');
   if (burger) burger.addEventListener('click', () => {

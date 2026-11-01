@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/includes/functions.php';
-$me = require_admin();
+$me = require_application_reviewer();
 
 $id = (int)($_GET['id'] ?? 0);
 
@@ -30,29 +30,85 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (isset($_POST['flag_id']) && in_array($_POST['verdict'] ?? '', ['confirmed_duplicate', 'not_duplicate'], true)) {
         $st = $pdo->prepare('UPDATE duplicate_flags SET review_status = ?, reviewed_by = ?, reviewed_at = NOW()
-                             WHERE flag_id = ? AND application_id = ?');
+                             WHERE flag_id = ? AND application_id = ? AND review_status = \'pending\'');
         $st->execute([$_POST['verdict'], $me['user_id'], (int)$_POST['flag_id'], $id]);
-        set_flash('Duplicate review saved.');
+        if ($st->rowCount()) {
+            audit_log($pdo, (int)$me['user_id'], $_POST['verdict'], 'duplicate_flag', (int)$_POST['flag_id'], [
+                'application_id' => $id,
+            ]);
+            set_flash('Duplicate review saved.');
+        } else {
+            set_flash('This duplicate flag has already been reviewed.', 'warn');
+        }
     } elseif ($isOpen && in_array($to, ['under_review', 'approved', 'rejected', 'for_compliance'], true)) {
         $note      = mb_substr(trim($_POST['note'] ?? ''), 0, 500);
         $isDecided = in_array($to, ['approved', 'rejected'], true);
+        if ($to === 'for_compliance' && $note === '') {
+            set_flash('Add remarks explaining what the student needs to revise.', 'bad');
+            header("Location: application_view.php?id=$id");
+            exit;
+        }
 
-        $pdo->beginTransaction();
-        $st = $pdo->prepare('UPDATE applications
-                             SET status = ?, decided_by = ?, decided_at = ?, decision_remarks = ?
-                             WHERE application_id = ?');
-        $st->execute([
-            $to,
-            $isDecided ? $me['user_id'] : $app['decided_by'],
-            $isDecided ? date('Y-m-d H:i:s') : $app['decided_at'],
-            $isDecided ? $note : $app['decision_remarks'],
-            $id,
-        ]);
-        $st = $pdo->prepare('INSERT INTO application_status_history (application_id, previous_status, new_status, changed_by, remarks)
-                             VALUES (?, ?, ?, ?, ?)');
-        $st->execute([$id, $app['status'], $to, $me['user_id'], $note ?: null]);
-        $pdo->commit();
-        set_flash('Application status updated successfully.');
+        try {
+            $pdo->beginTransaction();
+            $lock = $pdo->prepare('SELECT status, decided_by, decided_at, decision_remarks FROM applications WHERE application_id = ? FOR UPDATE');
+            $lock->execute([$id]);
+            $current = $lock->fetch();
+            if (!$current || !in_array($current['status'], ['submitted', 'under_review', 'for_compliance'], true)) {
+                throw new RuntimeException('This application has already been decided.');
+            }
+            if ($to === 'approved' && $app['period_id'] !== null) {
+                $periodLock = $pdo->prepare('SELECT slot_limit FROM application_periods WHERE period_id = ? FOR UPDATE');
+                $periodLock->execute([$app['period_id']]);
+                $slotLimit = $periodLock->fetchColumn();
+                if ($slotLimit !== false && $slotLimit !== null
+                    && scalar($pdo, "SELECT COUNT(*) FROM applications WHERE period_id = ? AND status = 'approved'", [$app['period_id']]) >= (int)$slotLimit) {
+                    throw new RuntimeException('This scholarship has reached its available slot limit.');
+                }
+            }
+            $st = $pdo->prepare('UPDATE applications
+                                 SET status = ?, decided_by = ?, decided_at = ?, decision_remarks = ?
+                                 WHERE application_id = ?');
+            $st->execute([
+                $to,
+                $isDecided ? $me['user_id'] : $current['decided_by'],
+                $isDecided ? date('Y-m-d H:i:s') : $current['decided_at'],
+                $isDecided ? $note : $current['decision_remarks'],
+                $id,
+            ]);
+            $st = $pdo->prepare('INSERT INTO application_status_history (application_id, previous_status, new_status, changed_by, remarks)
+                                 VALUES (?, ?, ?, ?, ?)');
+            $st->execute([$id, $current['status'], $to, $me['user_id'], $note ?: null]);
+            audit_log($pdo, (int)$me['user_id'], $to, 'application', $id, [
+                'previous_status' => $current['status'],
+                'new_status' => $to,
+                'remarks' => $note,
+            ]);
+            $pdo->commit();
+
+            $emailRequired = $note !== '' || in_array($to, ['approved', 'rejected', 'for_compliance'], true);
+            $emailBody = "Dear {$app['first_name']},\n\n"
+                . "Your application {$app['application_no']} is now "
+                . (['for_compliance' => 'requesting revision', 'under_review' => 'under review'][$to] ?? $to) . ".\n";
+            if ($note !== '') {
+                $emailBody .= "\nRemarks from the Scholarship Office:\n{$note}\n";
+            }
+            if ($emailRequired && !send_portal_email(
+                (string)$app['email'],
+                'Update on your LNU scholarship application',
+                $emailBody
+            )) {
+                set_flash('Application status updated, but the student email could not be sent. Check the server mail configuration.', 'warn');
+            } else {
+                set_flash('Application status updated successfully.');
+            }
+        } catch (Throwable $error) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log('LNU application review error: ' . $error->getMessage());
+            set_flash($error instanceof RuntimeException ? $error->getMessage() : 'The application could not be updated.', 'bad');
+        }
     } else {
         set_flash('This application can no longer be changed.', 'warn');
     }
@@ -117,14 +173,14 @@ require __DIR__ . '/includes/header.php';
     <form method="post" data-confirm="Change this application's status? This is recorded in the decision history.">
         <?= csrf_field() ?>
         <div class="f">
-            <label for="note">Staff note <span class="opt">(optional)</span></label>
+            <label for="note">Remarks to student <span class="opt">(optional; emailed when provided)</span></label>
             <input id="note" name="note" maxlength="500">
         </div>
         <div class="acts">
             <?php if ($app['status'] === 'submitted'): ?><button class="btn sec" name="to" value="under_review">Start Review</button><?php endif; ?>
             <button class="btn" name="to" value="approved">Approve</button>
             <button class="btn dng" name="to" value="rejected">Reject</button>
-            <button class="btn sec" name="to" value="for_compliance">Return for Correction</button>
+            <button class="btn sec" name="to" value="for_compliance">Request Revision</button>
         </div>
     </form>
     <?php endif; ?>

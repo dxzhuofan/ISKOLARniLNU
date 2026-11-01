@@ -1,11 +1,12 @@
 <?php
 require_once __DIR__ . '/includes/functions.php';
-$me = require_admin();
+$me = require_scholarship_manager();
 
 // Summary cards
 $totalStudents  = scalar($pdo, 'SELECT COUNT(*) FROM applicants');
 $pendingApps    = scalar($pdo, "SELECT COUNT(*) FROM applications WHERE status = 'submitted'");
 $listedGrantees = scalar($pdo, "SELECT COUNT(*) FROM grantees WHERE status = 'active'");
+$pendingAcademicChanges = scalar($pdo, "SELECT COUNT(*) FROM academic_change_requests WHERE status = 'pending'");
 
 // Needs Attention (each count opens the matching list with its filter applied)
 $waiting = scalar($pdo, "SELECT COUNT(*) FROM applications WHERE status IN ('submitted', 'under_review')");
@@ -41,6 +42,7 @@ require __DIR__ . '/includes/header.php';
     <a class="card" href="applications.php?status=submitted"><small>Pending Applications</small><b><?= $pendingApps ?></b></a>
     <a class="card" href="grantees.php"><small>Active Grantees</small><b><?= number_format($listedGrantees) ?></b></a>
     <a class="card" href="applications.php?flag=OCR+mismatch"><small>Items Requiring Attention</small><b><?= $needsAttention ?></b></a>
+    <a class="card" href="academic_changes.php"><small>Academic Changes Awaiting Approval</small><b><?= number_format($pendingAcademicChanges) ?></b></a>
 </div>
 
 <div class="grid2">

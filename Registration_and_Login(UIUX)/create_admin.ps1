@@ -8,7 +8,11 @@ if (-not (Test-Path -LiteralPath $PhpPath)) {
     throw "PHP CLI was not found at '$PhpPath'. Pass the path to php.exe as an argument."
 }
 
-$email = (Read-Host 'Administrator email').Trim()
+$roleName = (Read-Host 'Staff role (administrator, scholarship_officer, reviewer)').Trim().ToLowerInvariant()
+if ($roleName -notin @('administrator', 'scholarship_officer', 'reviewer')) {
+    throw 'Choose administrator, scholarship_officer, or reviewer.'
+}
+$email = (Read-Host 'Staff email').Trim()
 $firstName = (Read-Host 'First name').Trim()
 $middleName = (Read-Host 'Middle name (optional)').Trim()
 $lastName = (Read-Host 'Last name').Trim()
@@ -36,6 +40,7 @@ try {
         last_name = $lastName
         employee_no = $employeeNo
         position_title = $position
+        role_name = $roleName
         password = $password
     } | ConvertTo-Json -Compress
 

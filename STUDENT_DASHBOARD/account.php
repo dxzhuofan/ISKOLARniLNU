@@ -2,24 +2,6 @@
 require_once __DIR__ . '/includes/functions.php';
 $me = require_student();
 $uid = (int)$_SESSION['user_id'];
-$errors = [];
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    csrf_check();
-    $cur = $_POST['current'] ?? ''; $new = $_POST['new'] ?? ''; $conf = $_POST['confirm'] ?? '';
-    $hash = $pdo->prepare('SELECT password_hash FROM users WHERE user_id = ?');
-    $hash->execute([$uid]);
-    if (!password_verify($cur, (string)$hash->fetchColumn())) $errors[] = 'Your current password is incorrect.';
-    if (strlen($new) < 8) $errors[] = 'The new password must be at least 8 characters.';
-    if (!preg_match('/[A-Za-z]/', $new) || !preg_match('/\d/', $new)) $errors[] = 'Use at least one letter and one number.';
-    if ($new !== $conf) $errors[] = 'The new passwords do not match.';
-    if (!$errors) {
-        $pdo->prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE user_id = ?')->execute([password_hash($new, PASSWORD_DEFAULT), $uid]);
-        session_regenerate_id(true);
-        flash('success', 'Password changed.');
-        redirect('account.php');
-    }
-}
 $pageTitle = 'Account Settings'; $active = '';
 include __DIR__ . '/includes/header.php';
 ?>
@@ -34,15 +16,15 @@ include __DIR__ . '/includes/header.php';
     </dl>
     <p class="muted small">To change your email address, contact the Scholarship Office.</p>
   </section>
-  <form class="card" method="post" id="password">
+  <form class="card" method="post" action="../Registration_and_Login(UIUX)/request_password_change.php" id="password">
     <h2 class="card-title">Change password</h2>
-    <?php if ($errors): ?><div class="flash f-error"><ul><?php foreach ($errors as $er): ?><li><?= e($er) ?></li><?php endforeach; ?></ul></div><?php endif; ?>
     <?= csrf_field() ?>
     <div class="fg fg-1">
       <label>Current password<input type="password" name="current" required autocomplete="current-password"></label>
-      <label>New password<input type="password" name="new" required minlength="8" autocomplete="new-password"></label>
+      <label>New password<input type="password" name="new" required minlength="8" autocomplete="new-password" pattern="(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}" title="At least 8 characters, an uppercase letter, a number, and a symbol"></label>
       <label>Confirm new password<input type="password" name="confirm" required minlength="8" autocomplete="new-password"></label>
     </div>
+    <p class="muted small">A one-time code will be sent to <?= e($me['email']) ?> to confirm the password change.</p>
     <div class="form-actions"><button class="btn">Change password</button></div>
   </form>
 </div>

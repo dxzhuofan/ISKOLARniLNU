@@ -1,15 +1,17 @@
 <?php
 // Shared helpers for the ADMIN_DASHBOARD pages (same idea as STUDENT_DASHBOARD/includes/functions.php).
+date_default_timezone_set('Asia/Manila');
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
 // Same database connection the student side uses ($pdo).
 require_once __DIR__ . '/../../STUDENT_DASHBOARD/includes/db_connect.php';
+require_once __DIR__ . '/../../Registration_and_Login(UIUX)/mail.php';
 $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 
-const STAFF_ROLE = 2;                                 // roles.role_id 2 = administrator
 const LOGIN_URL  = '../Registration_and_Login(UIUX)/login.php';
+const STAFF_ROLES = ['administrator', 'scholarship_officer', 'reviewer'];
 
 // Names shown to staff for each applications.status value.
 const STATUS = [
@@ -44,15 +46,78 @@ CASE
 END
 SQL;
 
-// Like require_student(): returns the signed-in staff member.
-function require_admin(): array
+function current_staff_role(): string
 {
-    $role = $_SESSION['user']['role'] ?? $_SESSION['role_id'] ?? $_SESSION['user']['role_id'] ?? 0;
-    if (!in_array($role, ['administrator', STAFF_ROLE, (string)STAFF_ROLE], true)) {
+    $role = $_SESSION['user']['role'] ?? '';
+    if (in_array($role, STAFF_ROLES, true)) {
+        return $role;
+    }
+    return '';
+}
+
+function require_staff(): array
+{
+    global $pdo;
+    $userId = $_SESSION['user_id'] ?? $_SESSION['user']['id'] ?? $_SESSION['user']['user_id'] ?? null;
+    if (!is_numeric($userId) || (int)$userId < 1) {
         header('Location: ' . LOGIN_URL);
         exit;
     }
-    return ['user_id' => $_SESSION['user_id'] ?? $_SESSION['user']['id'] ?? $_SESSION['user']['user_id'] ?? null];
+    $st = $pdo->prepare(
+        'SELECT u.role_id, u.account_status, r.role_name
+         FROM users u JOIN roles r ON r.role_id = u.role_id
+         WHERE u.user_id = ? LIMIT 1'
+    );
+    $st->execute([(int)$userId]);
+    $account = $st->fetch();
+    if (!$account || $account['account_status'] !== 'active' || !in_array($account['role_name'], STAFF_ROLES, true)) {
+        unset($_SESSION['user'], $_SESSION['user_id'], $_SESSION['role_id']);
+        header('Location: ' . LOGIN_URL);
+        exit;
+    }
+    if (!isset($_SESSION['user']) || !is_array($_SESSION['user'])) {
+        $_SESSION['user'] = [];
+    }
+    $_SESSION['user']['role'] = $account['role_name'];
+    $_SESSION['user_id'] = (int)$userId;
+    $_SESSION['role_id'] = (int)$account['role_id'];
+    return ['user_id' => (int)$userId];
+}
+
+function require_admin(): array
+{
+    $me = require_staff();
+    if (current_staff_role() !== 'administrator') {
+        http_response_code(403);
+        exit('Super Admin access is required.');
+    }
+    return $me;
+}
+
+function require_scholarship_manager(): array
+{
+    $me = require_staff();
+    if (!in_array(current_staff_role(), ['administrator', 'scholarship_officer'], true)) {
+        http_response_code(403);
+        exit('Scholarship Officer or Super Admin access is required.');
+    }
+    return $me;
+}
+
+function require_application_reviewer(): array
+{
+    return require_staff();
+}
+
+function audit_log(PDO $pdo, int $userId, string $action, string $entityType, int $entityId, array $details = []): void
+{
+    $details = ['actor_role' => current_staff_role()] + $details;
+    $encoded = $details ? json_encode($details, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) : null;
+    $st = $pdo->prepare(
+        'INSERT INTO admin_audit_log (actor_user_id, action, entity_type, entity_id, details)
+         VALUES (?, ?, ?, ?, ?)'
+    );
+    $st->execute([$userId, $action, $entityType, $entityId, $encoded]);
 }
 
 function e($value): string
