@@ -21,10 +21,11 @@ $middleName = trim((string)($account['middle_name'] ?? ''));
 $lastName = trim((string)($account['last_name'] ?? ''));
 $employeeNo = trim((string)($account['employee_no'] ?? ''));
 $position = trim((string)($account['position_title'] ?? ''));
+$roleName = trim((string)($account['role_name'] ?? 'administrator'));
 $password = (string)($account['password'] ?? '');
 
-if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 150) {
-    fwrite(STDERR, "Enter a valid email address of at most 150 characters.\n");
+if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 150 || !preg_match('/@lnu\.edu\.ph$/i', $email)) {
+    fwrite(STDERR, "Enter a valid LNU email address ending in @lnu.edu.ph (at most 150 characters).\n");
     exit(1);
 }
 if ($firstName === '' || mb_strlen($firstName) > 80 || mb_strlen($middleName) > 80 || $lastName === '' || mb_strlen($lastName) > 80) {
@@ -35,8 +36,12 @@ if (mb_strlen($employeeNo) > 30 || mb_strlen($position) > 100) {
     fwrite(STDERR, "Employee number or position title is too long.\n");
     exit(1);
 }
+if (!in_array($roleName, ['administrator', 'scholarship_officer', 'reviewer'], true)) {
+    fwrite(STDERR, "Choose administrator, scholarship_officer, or reviewer as the staff role.\n");
+    exit(1);
+}
 if (strlen($password) < 12) {
-    fwrite(STDERR, "Use a unique administrator password with at least 12 characters.\n");
+    fwrite(STDERR, "Use a unique staff password with at least 12 characters.\n");
     exit(1);
 }
 
@@ -64,11 +69,11 @@ try {
         }
     }
 
-    $roleQuery = $pdo->prepare("SELECT role_id FROM roles WHERE role_name = 'administrator' LIMIT 1");
-    $roleQuery->execute();
+    $roleQuery = $pdo->prepare('SELECT role_id FROM roles WHERE role_name = ? LIMIT 1');
+    $roleQuery->execute([$roleName]);
     $roleId = $roleQuery->fetchColumn();
     if ($roleId === false) {
-        throw new RuntimeException("The 'administrator' role is missing from the roles table.");
+        throw new RuntimeException("The '{$roleName}' role is missing from the roles table. Run the staff roles migration first.");
     }
 
     $userId = (int)$pdo->query('SELECT COALESCE(MAX(user_id), -1) + 1 FROM users')->fetchColumn();
@@ -95,13 +100,13 @@ try {
     ]);
 
     $pdo->commit();
-    fwrite(STDOUT, "Administrator account created for {$email}.\n");
-    fwrite(STDOUT, "Sign in at http://localhost/ISKOLARniLNU/Registration_and_Login(UIUX)/login.php using the Administrator tab.\n");
+    fwrite(STDOUT, "Staff account ({$roleName}) created for {$email}.\n");
+    fwrite(STDOUT, "Sign in at http://localhost/ISKOLARniLNU/Registration_and_Login(UIUX)/login.php using the Staff tab.\n");
 } catch (Throwable $error) {
     if ($pdo instanceof PDO && $pdo->inTransaction()) {
         $pdo->rollBack();
     }
-    fwrite(STDERR, "Administrator account was not created: {$error->getMessage()}\n");
+    fwrite(STDERR, "Staff account was not created: {$error->getMessage()}\n");
     exit(1);
 } finally {
     if ($lockAcquired && $pdo instanceof PDO) {

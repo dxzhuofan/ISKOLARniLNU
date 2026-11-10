@@ -6,6 +6,7 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 date_default_timezone_set('Asia/Manila');
 require_once __DIR__ . '/db_connect.php';
+$pdo->exec("UPDATE application_periods SET status = 'closed' WHERE status = 'open' AND close_date < NOW()");
 
 const STATUS = [
     'draft'          => ['Draft', 'gray'],
@@ -80,6 +81,37 @@ function require_student() {
         exit('This account cannot use the student portal.');
     }
     return $me;
+}
+
+function scholarship_eligible(PDO $pdo, int $programId, int $applicantId): bool
+{
+    $scope = $pdo->prepare(
+        'SELECT college_code, program_code
+         FROM scholarship_program_eligibility
+         WHERE scholarship_program_id = ?'
+    );
+    $scope->execute([$programId]);
+    $eligibleScopes = $scope->fetchAll();
+    if (!$eligibleScopes) {
+        return true;
+    }
+
+    $profile = $pdo->prepare(
+        'SELECT college_code, program_code FROM applicant_academic_profiles WHERE applicant_id = ? LIMIT 1'
+    );
+    $profile->execute([$applicantId]);
+    $academic = $profile->fetch();
+    if (!$academic) {
+        return false;
+    }
+
+    foreach ($eligibleScopes as $eligibleScope) {
+        if ($eligibleScope['college_code'] === $academic['college_code']
+            && ($eligibleScope['program_code'] === '' || $eligibleScope['program_code'] === $academic['program_code'])) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // ---- Application period state: [open|upcoming|closed, days] ----

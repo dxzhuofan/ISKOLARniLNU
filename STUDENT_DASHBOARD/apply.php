@@ -10,6 +10,10 @@ function open_period($pid) {
     $s = $pdo->prepare("SELECT ap.* FROM application_periods ap
         JOIN scholarship_programs p ON p.scholarship_program_id = ap.scholarship_program_id AND p.is_active = 1
         WHERE ap.scholarship_program_id = ? AND ap.status = 'open' AND NOW() BETWEEN ap.open_date AND ap.close_date
+          AND (ap.slot_limit IS NULL OR (
+              SELECT COUNT(*) FROM applications a
+              WHERE a.period_id = ap.period_id AND a.status = 'approved'
+          ) < ap.slot_limit)
         ORDER BY ap.close_date DESC LIMIT 1");
     $s->execute([$pid]);
     return $s->fetch();
@@ -21,6 +25,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'start
     $pid = (int)($_POST['program_id'] ?? 0);
     $per = open_period($pid);
     if (!$per) { flash('error', 'Applications for this program are not open right now.'); redirect('scholarships.php'); }
+    if (!scholarship_eligible($pdo, $pid, $aid)) {
+        flash('error', 'Your registered college or program is not eligible for this scholarship.');
+        redirect('scholarships.php');
+    }
     $ex = $pdo->prepare('SELECT application_id, status FROM applications WHERE applicant_id = ? AND scholarship_program_id = ? AND period_id = ?');
     $ex->execute([$aid, $pid, $per['period_id']]);
     if ($row = $ex->fetch()) {
@@ -115,8 +123,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['
             $addr = ['address_line' => 150, 'barangay' => 100, 'city_municipality' => 100, 'province' => 100];
             $vals = [];
             foreach ($addr as $k => $len) $vals[$k] = mb_substr(trim($_POST[$k] ?? ''), 0, $len) ?: null;
-            if (!preg_match('/^[0-9+\-\s()]{7,20}$/', $mobile)) {
-                if ($strict) $errors[] = 'Enter a valid contact number (digits, spaces, + or -).';
+            if (!preg_match('/^09[0-9]{9}$/', $mobile)) {
+                if ($strict) $errors[] = 'Enter 11 digits starting with 09.';
             } else {
                 $pdo->prepare('UPDATE applicants SET mobile_number = ?, address_line = ?, barangay = ?, city_municipality = ?, province = ? WHERE applicant_id = ?')
                     ->execute([$mobile, $vals['address_line'], $vals['barangay'], $vals['city_municipality'], $vals['province'], $aid]);
@@ -251,7 +259,7 @@ include __DIR__ . '/includes/header.php';
         <label>Student number<input value="<?= e($me['student_number']) ?>" disabled></label>
         <label>Date of birth<input value="<?= fdate($me['birth_date']) ?>" disabled></label>
         <label>Email address<input value="<?= e($me['email']) ?>" disabled></label>
-        <label>Contact number *<input name="mobile_number" required maxlength="20" inputmode="tel" value="<?= e($_POST['mobile_number'] ?? $me['mobile_number']) ?>"></label>
+        <label>Contact number *<input name="mobile_number" required maxlength="11" inputmode="numeric" pattern="09[0-9]{9}" data-digits-only value="<?= e($_POST['mobile_number'] ?? $me['mobile_number']) ?>"></label>
         <label>Street / address line<input name="address_line" maxlength="150" value="<?= e($_POST['address_line'] ?? $me['address_line']) ?>"></label>
         <label>Barangay<input name="barangay" maxlength="100" value="<?= e($_POST['barangay'] ?? $me['barangay']) ?>"></label>
         <label>City / municipality<input name="city_municipality" maxlength="100" value="<?= e($_POST['city_municipality'] ?? $me['city_municipality']) ?>"></label>

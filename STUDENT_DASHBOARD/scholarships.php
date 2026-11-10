@@ -14,6 +14,19 @@ $st = $pdo->prepare("SELECT p.*, ap.period_id, ap.open_date, ap.close_date, ap.s
     WHERE p.is_active = 1 ORDER BY p.program_name");
 $st->execute([$aid]);
 $programs = $st->fetchAll();
+$catalog = require __DIR__ . '/../Registration_and_Login(UIUX)/academic_catalog.php';
+
+$academicQuery = $pdo->prepare(
+    'SELECT college_code, program_code FROM applicant_academic_profiles WHERE applicant_id = ? LIMIT 1'
+);
+$academicQuery->execute([$aid]);
+$academicProfile = $academicQuery->fetch();
+$eligibilityByProgram = [];
+foreach ($pdo->query(
+    'SELECT scholarship_program_id, college_code, program_code FROM scholarship_program_eligibility'
+) as $scope) {
+    $eligibilityByProgram[$scope['scholarship_program_id']][] = $scope;
+}
 
 $reqs = [];
 foreach ($pdo->query('SELECT r.scholarship_program_id AS pid, r.document_type_id, r.is_required, dt.type_name
@@ -59,7 +72,28 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <div class="cards" id="schCards">
+<?php $visibleProgramCount = 0; ?>
 <?php foreach ($programs as $p):
+    $scopes = $eligibilityByProgram[$p['scholarship_program_id']] ?? [];
+    $scopeLabels = [];
+    foreach ($scopes as $scope) {
+        $college = $catalog[$scope['college_code']] ?? null;
+        if (!$college) continue;
+        $scopeLabels[] = $scope['program_code'] === ''
+            ? $college['name'] . ' (all programs)'
+            : $college['name'] . ' — ' . ($college['programs'][$scope['program_code']]['name'] ?? $scope['program_code']);
+    }
+    $matchesProfile = false;
+    foreach ($scopes as $scope) {
+        if ($academicProfile
+            && $scope['college_code'] === $academicProfile['college_code']
+            && ($scope['program_code'] === '' || $scope['program_code'] === $academicProfile['program_code'])) {
+            $matchesProfile = true;
+            break;
+        }
+    }
+    if ($scopes && !$matchesProfile) continue;
+    $visibleProgramCount++;
     if ($p['period_id']) { [$state, $days] = period_state($p['open_date'], $p['close_date'], $p['period_status']); } else { $state = 'closed'; $days = 0; }
     $list = $reqs[$p['scholarship_program_id']] ?? [];
     $req = array_values(array_filter($list, fn($r) => $r['is_required']));
@@ -80,6 +114,7 @@ include __DIR__ . '/includes/header.php';
     <dl class="meta">
       <div><dt>Benefit</dt><dd><?= $benefit ? e($benefit) : 'To be announced' ?></dd></div>
       <div><dt>Eligibility</dt><dd><?= e($p['eligibility_notes'] ?: 'See program details') ?></dd></div>
+      <div><dt>Eligible colleges/programs</dt><dd><?= e($scopeLabels ? implode(', ', $scopeLabels) : 'All colleges and programs') ?></dd></div>
       <div><dt>Documents</dt><dd><?= $req ? e(implode(', ', array_slice(array_column($req, 'type_name'), 0, 3))) . (count($req) > 3 ? ' +' . (count($req) - 3) . ' more' : '') : 'None listed yet' ?></dd></div>
       <div><dt>Deadline</dt><dd><?= $p['period_id'] ? fdate($p['close_date']) : 'No application period' ?>
         <span class="days <?= days_class($state, $days) ?>"><?= $p['period_id'] ? e(days_text($state, $days)) : 'Closed' ?></span></dd></div>
@@ -98,5 +133,9 @@ include __DIR__ . '/includes/header.php';
 <?php endforeach; ?>
 </div>
 <p class="empty" id="schEmpty" hidden>No scholarships match your filters. Clear a filter to see more.</p>
-<?php if (!$programs): ?><p class="empty">No scholarship programs are available yet.</p><?php endif; ?>
+<?php if (!$programs): ?>
+  <p class="empty">No scholarship programs are available yet.</p>
+<?php elseif (!$visibleProgramCount): ?>
+  <p class="empty">No scholarships are currently eligible for your registered college and program.</p>
+<?php endif; ?>
 <?php include __DIR__ . '/includes/footer.php'; ?>

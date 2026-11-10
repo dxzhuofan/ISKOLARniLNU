@@ -8,6 +8,21 @@ $st = $pdo->prepare('SELECT * FROM scholarship_programs WHERE scholarship_progra
 $st->execute([$pid]);
 $p = $st->fetch();
 if (!$p) { flash('error', 'That scholarship could not be found.'); redirect('scholarships.php'); }
+$isEligible = scholarship_eligible($pdo, $pid, $aid);
+$catalog = require __DIR__ . '/../Registration_and_Login(UIUX)/academic_catalog.php';
+$scopeQuery = $pdo->prepare(
+    'SELECT college_code, program_code FROM scholarship_program_eligibility WHERE scholarship_program_id = ?'
+);
+$scopeQuery->execute([$pid]);
+$eligibilityScopes = $scopeQuery->fetchAll();
+$eligibilityLabels = [];
+foreach ($eligibilityScopes as $scope) {
+    $college = $catalog[$scope['college_code']] ?? null;
+    if (!$college) continue;
+    $eligibilityLabels[] = $scope['program_code'] === ''
+        ? $college['name'] . ' (all programs)'
+        : $college['name'] . ' — ' . ($college['programs'][$scope['program_code']]['name'] ?? $scope['program_code']);
+}
 
 $st = $pdo->prepare("SELECT * FROM application_periods WHERE scholarship_program_id = ? AND status IN ('open','closed')
                      ORDER BY (status = 'open') DESC, close_date DESC LIMIT 1");
@@ -43,6 +58,7 @@ include __DIR__ . '/includes/header.php';
 
     <h2 class="sub">Eligibility requirements</h2>
     <p><?= nl2br(e($p['eligibility_notes'] ?: 'Eligibility details will be posted by the Scholarship Office.')) ?></p>
+    <p><b>Eligible colleges/programs:</b> <?= e($eligibilityLabels ? implode(', ', $eligibilityLabels) : 'All colleges and programs') ?></p>
 
     <h2 class="sub">Required documents</h2>
     <?php if (!$required): ?><p class="muted">No required documents are listed yet.</p><?php endif; ?>
@@ -75,15 +91,17 @@ include __DIR__ . '/includes/header.php';
     <?php elseif ($mine): ?>
       <a class="btn btn-alt btn-block" href="application_view.php?id=<?= (int)$mine['application_id'] ?>">View my application</a>
       <p class="muted small">You already applied to this program for this period.</p>
-    <?php elseif ($state === 'open'): ?>
+    <?php elseif ($state === 'open' && $isEligible): ?>
       <button class="btn btn-block" type="button" id="apply" data-open-modal="applyModal">Apply Now</button>
+    <?php elseif ($state === 'open'): ?>
+      <button class="btn btn-block" type="button" disabled>Not eligible for this scholarship</button>
     <?php else: ?>
       <button class="btn btn-block" type="button" disabled><?= $state === 'upcoming' ? 'Not open yet' : 'Applications closed' ?></button>
     <?php endif; ?>
   </aside>
 </div>
 
-<?php if (!$mine && $state === 'open'): ?>
+<?php if (!$mine && $state === 'open' && $isEligible): ?>
 <div class="modal" id="applyModal" role="dialog" aria-modal="true" aria-labelledby="applyTitle" hidden>
   <form class="card modal-card" method="post" action="apply.php">
     <?= csrf_field() ?>

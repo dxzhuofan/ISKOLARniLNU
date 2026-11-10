@@ -7,7 +7,7 @@ $errors = [];
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
     $mobile = trim($_POST['mobile_number'] ?? '');
-    if (!preg_match('/^[0-9+\-\s()]{7,20}$/', $mobile)) $errors[] = 'Enter a valid contact number (digits, spaces, + or -).';
+    if (!preg_match('/^09[0-9]{9}$/', $mobile)) $errors[] = 'Enter 11 digits starting with 09.';
     $v = [];
     foreach (['address_line' => 150, 'barangay' => 100, 'city_municipality' => 100, 'province' => 100] as $k => $len) $v[$k] = mb_substr(trim($_POST[$k] ?? ''), 0, $len) ?: null;
     if (!$errors) {
@@ -21,6 +21,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $g = $pdo->prepare("SELECT p.program_name FROM grantees g JOIN scholarship_programs p ON p.scholarship_program_id = g.scholarship_program_id WHERE g.applicant_id = ? AND g.status = 'active' LIMIT 1");
 $g->execute([$aid]);
 $grantee = $g->fetchColumn();
+$academicQuery = $pdo->prepare(
+    'SELECT year_level, college_code, program_code, specialization
+     FROM applicant_academic_profiles WHERE applicant_id = ?'
+);
+$academicQuery->execute([$aid]);
+$academic = $academicQuery->fetch();
+$changeQuery = $pdo->prepare(
+    'SELECT status, requested_at FROM academic_change_requests
+     WHERE applicant_id = ? ORDER BY requested_at DESC LIMIT 1'
+);
+$changeQuery->execute([$aid]);
+$academicChange = $changeQuery->fetch();
+$catalog = require __DIR__ . '/../Registration_and_Login(UIUX)/academic_catalog.php';
+$collegeName = $catalog[$academic['college_code']]['name'] ?? ($academic['college_code'] ?? '');
+$programData = $catalog[$academic['college_code']]['programs'][$academic['program_code']] ?? null;
 
 $pageTitle = 'My Profile'; $active = '';
 include __DIR__ . '/includes/header.php';
@@ -38,12 +53,28 @@ include __DIR__ . '/includes/header.php';
     </dl>
     <p class="muted small">Name, student number, birth date and grantee details are verified by the Scholarship Office. Ask the office to correct them.</p>
   </section>
+  <section class="card">
+    <h2 class="card-title">Academic information</h2>
+    <?php if ($academic): ?>
+      <dl>
+        <div><dt>Year level</dt><dd><?= (int)$academic['year_level'] ?></dd></div>
+        <div><dt>College</dt><dd><?= e($collegeName) ?></dd></div>
+        <div><dt>Program</dt><dd><?= e($programData['name'] ?? $academic['program_code']) ?></dd></div>
+        <?php if ($academic['specialization']): ?><div><dt>Major / specialization</dt><dd><?= e($academic['specialization']) ?></dd></div><?php endif; ?>
+      </dl>
+      <p class="muted small">Your program and specialization are locked. Changes require Scholarship Office approval.</p>
+      <?php if ($academicChange): ?><p class="muted small">Latest change request: <?= e(ucfirst($academicChange['status'])) ?> · <?= e(fdate($academicChange['requested_at'])) ?></p><?php endif; ?>
+      <a class="btn sec" href="request_academic_change.php">Request an academic change</a>
+    <?php else: ?>
+      <p class="muted">No academic program has been recorded for this account.</p>
+    <?php endif; ?>
+  </section>
   <form class="card" method="post">
     <h2 class="card-title">Contact information</h2>
     <?php if ($errors): ?><div class="flash f-error"><?= e(implode(' ', $errors)) ?></div><?php endif; ?>
     <?= csrf_field() ?>
     <div class="fg fg-1">
-      <label>Contact number *<input name="mobile_number" required maxlength="20" inputmode="tel" value="<?= e($_POST['mobile_number'] ?? $me['mobile_number']) ?>"></label>
+      <label>Contact number *<input name="mobile_number" required maxlength="11" inputmode="numeric" pattern="09[0-9]{9}" data-digits-only value="<?= e($_POST['mobile_number'] ?? $me['mobile_number']) ?>"></label>
       <label>Street / address line<input name="address_line" maxlength="150" value="<?= e($_POST['address_line'] ?? $me['address_line']) ?>"></label>
       <label>Barangay<input name="barangay" maxlength="100" value="<?= e($_POST['barangay'] ?? $me['barangay']) ?>"></label>
       <label>City / municipality<input name="city_municipality" maxlength="100" value="<?= e($_POST['city_municipality'] ?? $me['city_municipality']) ?>"></label>
